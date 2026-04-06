@@ -133,6 +133,12 @@ cd rust
 
 Useful interactive commands include `/help`, `/status`, `/cost`, `/config`, `/session`, `/model`, `/permissions`, and `/export`.
 
+## OMC interoperability snapshot
+
+- `claw skills` and `/skills` discover compatibility skills from `.omc/skills`, `.agents/skills`, `~/.omc/skills`, `~/.claude/skills/omc-learned`, and `CLAUDE_CONFIG_DIR`.
+- `claw` still does **not** execute Claude Code plugin slash commands like `/oh-my-claudecode:hud`; those remain OMC/Claude-only runtime surfaces.
+- OMC HUD/statusline wiring depends on Claude Code `statusLine` stdin and `.omc/state/sessions/{CLAUDE_SESSION_ID}` hooks. `claw` currently exposes `/status` reports, but it does not provide that Claude runtime contract.
+
 ## Config file resolution order
 
 Runtime config is loaded in this order, with later entries overriding earlier ones:
