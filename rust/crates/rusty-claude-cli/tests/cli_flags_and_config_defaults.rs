@@ -6,6 +6,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use runtime::Session;
 
+mod support;
+
+use support::claw_command;
+
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[test]
@@ -15,8 +19,7 @@ fn status_command_applies_model_and_permission_mode_flags() {
     fs::create_dir_all(&temp_dir).expect("temp dir should exist");
 
     // when
-    let output = Command::new(env!("CARGO_BIN_EXE_claw"))
-        .current_dir(&temp_dir)
+    let output = claw_command(&temp_dir)
         .args([
             "--model",
             "sonnet",
@@ -45,8 +48,7 @@ fn resume_flag_loads_a_saved_session_and_dispatches_status() {
     let session_path = write_session(&temp_dir, "resume-status");
 
     // when
-    let output = Command::new(env!("CARGO_BIN_EXE_claw"))
-        .current_dir(&temp_dir)
+    let output = claw_command(&temp_dir)
         .args([
             "--resume",
             session_path.to_str().expect("utf8 path"),
@@ -73,13 +75,11 @@ fn slash_command_names_match_known_commands_and_suggest_nearby_unknown_ones() {
     fs::create_dir_all(&temp_dir).expect("temp dir should exist");
 
     // when
-    let help_output = Command::new(env!("CARGO_BIN_EXE_claw"))
-        .current_dir(&temp_dir)
+    let help_output = claw_command(&temp_dir)
         .arg("/help")
         .output()
         .expect("claw should launch");
-    let unknown_output = Command::new(env!("CARGO_BIN_EXE_claw"))
-        .current_dir(&temp_dir)
+    let unknown_output = claw_command(&temp_dir)
         .arg("/zstats")
         .output()
         .expect("claw should launch");
@@ -109,8 +109,7 @@ fn omc_namespaced_slash_commands_surface_a_targeted_compatibility_hint() {
     let temp_dir = unique_temp_dir("slash-dispatch-omc");
     fs::create_dir_all(&temp_dir).expect("temp dir should exist");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_claw"))
-        .current_dir(&temp_dir)
+    let output = claw_command(&temp_dir)
         .arg("/oh-my-claudecode:hud")
         .output()
         .expect("claw should launch");
@@ -259,9 +258,7 @@ fn local_subcommand_help_does_not_fall_through_to_runtime_or_provider_calls() {
 }
 
 fn command_in(cwd: &Path) -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_claw"));
-    command.current_dir(cwd);
-    command
+    claw_command(cwd)
 }
 
 fn write_session(root: &Path, label: &str) -> PathBuf {

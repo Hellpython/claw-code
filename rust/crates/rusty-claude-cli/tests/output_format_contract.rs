@@ -1,10 +1,14 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
+
+mod support;
+
+use support::claw_command;
 
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -373,8 +377,8 @@ fn assert_json_command_with_env(current_dir: &Path, args: &[&str], envs: &[(&str
 }
 
 fn run_claw(current_dir: &Path, args: &[&str], envs: &[(&str, &str)]) -> Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_claw"));
-    command.current_dir(current_dir).args(args);
+    let mut command = claw_command(current_dir);
+    command.args(args);
     for (key, value) in envs {
         command.env(key, value);
     }

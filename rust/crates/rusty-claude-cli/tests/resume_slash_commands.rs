@@ -1,13 +1,19 @@
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
-use std::process::{Command, Output};
+use std::process::Output;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::thread;
+use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use runtime::ContentBlock;
 use runtime::Session;
 use serde_json::Value;
+
+mod support;
+
+use support::claw_command;
 
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -193,6 +199,7 @@ fn resume_latest_restores_the_most_recent_managed_session() {
     older
         .save_to_path(&older_path)
         .expect("older session should persist");
+    thread::sleep(Duration::from_millis(10));
 
     let mut newer = Session::new().with_persistence_path(&newer_path);
     newer
@@ -323,8 +330,8 @@ fn run_claw(current_dir: &Path, args: &[&str]) -> Output {
 }
 
 fn run_claw_with_env(current_dir: &Path, args: &[&str], envs: &[(&str, &str)]) -> Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_claw"));
-    command.current_dir(current_dir).args(args);
+    let mut command = claw_command(current_dir);
+    command.args(args);
     for (key, value) in envs {
         command.env(key, value);
     }
