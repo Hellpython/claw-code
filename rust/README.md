@@ -172,6 +172,8 @@ Notable claw-first surfaces now available directly in slash form:
 - `/plugin [list|install <path>|enable <name>|disable <name>|uninstall <id>|update <id>]`
 - `/subagent [list|steer <target> <msg>|kill <id>]`
 
+`/plugin list` now reports broken installed plugin directories and their validation errors so stale half-installs do not masquerade as “missing” plugins during support/debugging.
+
 See [`../USAGE.md`](../USAGE.md) for usage examples and run `cargo run -p rusty-claude-cli -- --help` for the live canonical command list.
 
 ## Workspace Layout

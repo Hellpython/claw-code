@@ -4,7 +4,7 @@ use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use plugins::{PluginError, PluginManager, PluginSummary};
+use plugins::{PluginError, PluginLoadFailure, PluginManager, PluginSummary};
 use runtime::{
     compact_session, CompactionConfig, ConfigLoader, ConfigSource, McpOAuthConfig, McpServerConfig,
     ScopedMcpServerConfig, Session,
@@ -2132,10 +2132,13 @@ pub fn handle_plugins_slash_command(
     manager: &mut PluginManager,
 ) -> Result<PluginsCommandResult, PluginError> {
     match action {
-        None | Some("list") => Ok(PluginsCommandResult {
-            message: render_plugins_report(&manager.list_installed_plugins()?),
-            reload_runtime: false,
-        }),
+        None | Some("list") => {
+            let report = manager.installed_plugin_registry_report()?;
+            Ok(PluginsCommandResult {
+                message: render_plugins_report(&report.summaries(), report.failures()),
+                reload_runtime: false,
+            })
+        }
         Some("install") => {
             let Some(target) = target else {
                 return Ok(PluginsCommandResult {
@@ -2568,23 +2571,41 @@ fn render_mcp_report_json_for(
 }
 
 #[must_use]
-pub fn render_plugins_report(plugins: &[PluginSummary]) -> String {
+pub fn render_plugins_report(plugins: &[PluginSummary], failures: &[PluginLoadFailure]) -> String {
     let mut lines = vec!["Plugins".to_string()];
-    if plugins.is_empty() {
+    if plugins.is_empty() && failures.is_empty() {
         lines.push("  No plugins installed.".to_string());
         return lines.join("\n");
     }
-    for plugin in plugins {
-        let enabled = if plugin.enabled {
-            "enabled"
-        } else {
-            "disabled"
-        };
+    if plugins.is_empty() {
+        lines.push("  No healthy plugins installed.".to_string());
+    } else {
+        for plugin in plugins {
+            let enabled = if plugin.enabled {
+                "enabled"
+            } else {
+                "disabled"
+            };
+            lines.push(format!(
+                "  {name:<20} v{version:<10} {enabled}",
+                name = plugin.metadata.name,
+                version = plugin.metadata.version,
+            ));
+        }
+    }
+    if !failures.is_empty() {
         lines.push(format!(
-            "  {name:<20} v{version:<10} {enabled}",
-            name = plugin.metadata.name,
-            version = plugin.metadata.version,
+            "  Broken installed plugins ({count})",
+            count = failures.len()
         ));
+        for failure in failures {
+            lines.push(format!(
+                "    {kind} plugin at {}",
+                failure.plugin_root.display(),
+                kind = failure.kind,
+            ));
+            lines.push(format!("      {}", failure.error()));
+        }
     }
     lines.join("\n")
 }
@@ -4024,7 +4045,10 @@ mod tests {
         suggest_slash_commands, validate_slash_command_input, DefinitionSource, SkillOrigin,
         SkillRoot, SkillSlashDispatch, SlashCommand,
     };
-    use plugins::{PluginKind, PluginManager, PluginManagerConfig, PluginMetadata, PluginSummary};
+    use plugins::{
+        PluginError, PluginKind, PluginLoadFailure, PluginManager, PluginManagerConfig,
+        PluginMetadata, PluginSummary,
+    };
     use runtime::{
         CompactionConfig, ConfigLoader, ContentBlock, ConversationMessage, MessageRole, Session,
     };
@@ -4075,6 +4099,17 @@ mod tests {
             ),
         )
         .expect("write bundled manifest");
+    }
+
+    fn write_broken_plugin(root: &Path, name: &str) {
+        fs::create_dir_all(root.join(".claude-plugin")).expect("manifest dir");
+        fs::write(
+            root.join(".claude-plugin").join("plugin.json"),
+            format!(
+                "{{\n  \"name\": \"{name}\",\n  \"version\": \"1.0.0\",\n  \"description\": \"broken commands plugin\",\n  \"hooks\": {{\n    \"PreToolUse\": [\"./hooks/missing.sh\"]\n  }}\n}}"
+            ),
+        )
+        .expect("write broken manifest");
     }
 
     fn write_agent(root: &Path, name: &str, description: &str, model: &str, reasoning: &str) {
@@ -4728,34 +4763,37 @@ mod tests {
 
     #[test]
     fn renders_plugins_report_with_name_version_and_status() {
-        let rendered = render_plugins_report(&[
-            PluginSummary {
-                metadata: PluginMetadata {
-                    id: "demo@external".to_string(),
-                    name: "demo".to_string(),
-                    version: "1.2.3".to_string(),
-                    description: "demo plugin".to_string(),
-                    kind: PluginKind::External,
-                    source: "demo".to_string(),
-                    default_enabled: false,
-                    root: None,
+        let rendered = render_plugins_report(
+            &[
+                PluginSummary {
+                    metadata: PluginMetadata {
+                        id: "demo@external".to_string(),
+                        name: "demo".to_string(),
+                        version: "1.2.3".to_string(),
+                        description: "demo plugin".to_string(),
+                        kind: PluginKind::External,
+                        source: "demo".to_string(),
+                        default_enabled: false,
+                        root: None,
+                    },
+                    enabled: true,
                 },
-                enabled: true,
-            },
-            PluginSummary {
-                metadata: PluginMetadata {
-                    id: "sample@external".to_string(),
-                    name: "sample".to_string(),
-                    version: "0.9.0".to_string(),
-                    description: "sample plugin".to_string(),
-                    kind: PluginKind::External,
-                    source: "sample".to_string(),
-                    default_enabled: false,
-                    root: None,
+                PluginSummary {
+                    metadata: PluginMetadata {
+                        id: "sample@external".to_string(),
+                        name: "sample".to_string(),
+                        version: "0.9.0".to_string(),
+                        description: "sample plugin".to_string(),
+                        kind: PluginKind::External,
+                        source: "sample".to_string(),
+                        default_enabled: false,
+                        root: None,
+                    },
+                    enabled: false,
                 },
-                enabled: false,
-            },
-        ]);
+            ],
+            &[],
+        );
 
         assert!(rendered.contains("demo"));
         assert!(rendered.contains("v1.2.3"));
@@ -4763,6 +4801,27 @@ mod tests {
         assert!(rendered.contains("sample"));
         assert!(rendered.contains("v0.9.0"));
         assert!(rendered.contains("disabled"));
+    }
+
+    #[test]
+    fn renders_plugins_report_with_broken_installs() {
+        let failure_root = temp_dir("plugins-report-broken");
+        let rendered = render_plugins_report(
+            &[],
+            &[PluginLoadFailure::new(
+                failure_root.clone(),
+                PluginKind::External,
+                failure_root.display().to_string(),
+                PluginError::NotFound("hook path does not exist".to_string()),
+            )],
+        );
+
+        assert!(rendered.contains("No healthy plugins installed."));
+        assert!(rendered.contains("Broken installed plugins (1)"));
+        assert!(rendered.contains(&failure_root.display().to_string()));
+        assert!(rendered.contains("hook path does not exist"));
+
+        let _ = fs::remove_dir_all(failure_root);
     }
 
     #[test]
@@ -5460,5 +5519,29 @@ mod tests {
 
         let _ = fs::remove_dir_all(config_home);
         let _ = fs::remove_dir_all(bundled_root);
+    }
+
+    #[test]
+    fn plugin_list_surfaces_broken_installed_plugins() {
+        let config_home = temp_dir("broken-installed-home");
+        let install_root = config_home.join("plugins").join("installed");
+        write_external_plugin(&install_root.join("healthy"), "healthy", "1.0.0");
+        write_broken_plugin(&install_root.join("broken"), "broken");
+
+        let mut config = PluginManagerConfig::new(&config_home);
+        config.install_root = Some(install_root.clone());
+        let mut manager = PluginManager::new(config);
+
+        let list = handle_plugins_slash_command(Some("list"), None, &mut manager)
+            .expect("list command should succeed");
+
+        assert!(list.message.contains("healthy"));
+        assert!(list.message.contains("Broken installed plugins (1)"));
+        assert!(list
+            .message
+            .contains(&install_root.join("broken").display().to_string()));
+        assert!(list.message.contains("does not exist"));
+
+        let _ = fs::remove_dir_all(config_home);
     }
 }
